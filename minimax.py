@@ -33,10 +33,14 @@ def plateau_to_key(plateau):
 
 def evaluer_plateau(plateau, joueur_id, adversaire_id):
     """
-    Évalue la qualité du plateau pour le joueur actuel.
+    Évalue la qualité du plateau pour le joueur actuel avec analyse tactique avancée.
     
-    Score = (nos jetons - jetons adversaire)
-    Un score positif signifie qu'on a l'avantage.
+    Prend en compte:
+    1. La différence de jetons (score brut)
+    2. Les cellules prêtes à exploser (3 jetons) - très important!
+    3. Les chaînes d'explosion potentielles
+    4. Le contrôle du plateau
+    5. Les menaces imminentes de l'adversaire
     
     Args:
         plateau: La grille de jeu (List[List[Cell]])
@@ -44,11 +48,86 @@ def evaluer_plateau(plateau, joueur_id, adversaire_id):
         adversaire_id: ID de l'adversaire
     
     Returns:
-        La différence de jetons (int)
+        Score évalué (int)
     """
+    from game import BOARD_SIZE, voisins
+    
+    # Score de base: différence de jetons
     score_nous = compter_jetons(plateau, joueur_id)
     score_adversaire = compter_jetons(plateau, adversaire_id)
-    return score_nous - score_adversaire
+    score_base = score_nous - score_adversaire
+    
+    bonus_nous = 0
+    malus_adversaire = 0
+    
+    # Analyser chaque cellule du plateau
+    for x in range(BOARD_SIZE):
+        for y in range(BOARD_SIZE):
+            cell = plateau[x][y]
+            
+            # === CELLULES PRÊTES À EXPLOSER (3 jetons) ===
+            # C'est CRUCIAL - avoir une cellule prête à exploser est très avantageux
+            if cell.jeton == 3:
+                if cell.joueur == joueur_id:
+                    bonus_nous += 15  # Grand bonus si on peut exploser
+                elif cell.joueur == adversaire_id:
+                    malus_adversaire += 15  # Alerte: l'adversaire peut exploser!
+            
+            # === CELLULES À 2 JETONS ===
+            # Proches de l'explosion, à surveiller
+            elif cell.jeton == 2:
+                if cell.joueur == joueur_id:
+                    bonus_nous += 5
+                elif cell.joueur == adversaire_id:
+                    malus_adversaire += 5
+            
+            # === CELLULES CONTRÔLÉES ===
+            # Bonus pour les zones défendues
+            elif cell.jeton >= 1:
+                if cell.joueur == joueur_id:
+                    bonus_nous += 2
+                elif cell.joueur == adversaire_id:
+                    malus_adversaire += 2
+    
+    # === ANALYSE DES CHAÎNES D'EXPLOSION POTENTIELLES ===
+    # Identifier les positions stratégiques qui pourraient trigger des explosions en cascade
+    for x in range(BOARD_SIZE):
+        for y in range(BOARD_SIZE):
+            cell = plateau[x][y]
+            
+            if cell.jeton == 3 and cell.joueur != 0:
+                joueur_cell = cell.joueur
+                voisins_list = voisins(x, y)
+                
+                # Compter les voisins du même joueur
+                voisins_memes = sum(
+                    1 for nx, ny in voisins_list
+                    if plateau[nx][ny].joueur == joueur_cell and plateau[nx][ny].jeton > 0
+                )
+                
+                # Bonus additionnel si explosion en chaîne probable
+                bonus_chaine = voisins_memes * 3
+                
+                if joueur_cell == joueur_id:
+                    bonus_nous += bonus_chaine
+                else:
+                    malus_adversaire += bonus_chaine
+    
+    # === MENACES IMMINENTES DE L'ADVERSAIRE ===
+    # Pénalité si l'adversaire a plusieurs cellules prêtes à exploser
+    cellules_pret_exploser_adversaire = sum(
+        1 for row in plateau for cell in row
+        if cell.joueur == adversaire_id and cell.jeton == 3
+    )
+    if cellules_pret_exploser_adversaire > 1:
+        malus_adversaire += cellules_pret_exploser_adversaire * 10
+    
+    # === SCORE FINAL COMBINÉ ===
+    # Structure: Score brut + bonus - malus
+    # Les cellules prêtes à exploser ont un poids TRÈS IMPORTANT
+    score_final = score_base + bonus_nous - malus_adversaire
+    
+    return score_final
 
 
 def minimax_alpha_beta(plateau, joueur_id, adversaire_id, profondeur, est_maximisant, 
